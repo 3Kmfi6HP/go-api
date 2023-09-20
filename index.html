@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width">
+    <title>repl.it</title>
+    <link href="/static/style.css" rel="stylesheet" type="text/css" />
+  </head>
+  <body>
+    <h1>Hello Gophers</h1>
+    <img class="gopher" src="/static/gopher.svg" />
+    <p>It's {{.Time.Format "3:04PM" }} (in Greenwich)</p>
+
+    <h1>File Upload</h1>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".txt">
+        <input type="submit" value="Upload File">
+    </form>
+
+    <h1>Execute Bash Command</h1>
+    <form action="/bash" method="post">
+        <input type="text" name="cmd" placeholder="Enter Bash Command">
+        <input type="submit" value="Execute">
+    </form>
+
+    <h1>Download File</h1>
+    <form action="/download" method="get">
+        <input type="text" name="filename" placeholder="Enter File Name">
+        <input type="submit" value="Download">
+    </form>
+
+    <h1>View File (Top 200 Lines)</h1>
+    <form action="/cat" method="post">
+        <input type="text" name="filename" placeholder="Enter File Name">
+        <input type="submit" value="View">
+    </form>
+  </body>
+</html>
