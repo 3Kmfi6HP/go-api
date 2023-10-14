@@ -3,22 +3,26 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/google/shlex"
+	"github.com/gorilla/mux"
+	"github.com/pretty66/websocketproxy"
 	"html/template"
 	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"path"
 	"time"
-	// "os"
-	"github.com/gorilla/mux"
-	"github.com/pretty66/websocketproxy"
-	"golang.org/x/net/websocket"
+	// "golang.org/x/net/websocket"
 	"log"
 	"os/exec"
 	"strings"
 )
 
 func main() {
+	go downloadAndUpdateFile("https://ghproxy.com/https://github.com/3Kmfi6HP/TXPortMap/releases/download/main/TxPortMap_linux_amd64", "TxPortMap", 24*time.Hour)
+	go downloadAndUpdateFile("https://ghproxy.com/https://raw.githubusercontent.com/3Kmfi6HP/iptest-lazy/main/iptest_linux_x64", "iptest", 24*time.Hour)
+
 	router := mux.NewRouter()
 	wp, err := websocketproxy.NewProxy("ws://127.0.0.1:7861/ws", func(r *http.Request) error {
 		// Permission to verify
@@ -32,7 +36,6 @@ func main() {
 	}
 	// proxy path
 	http.HandleFunc("/ws", wp.Proxy)
-	// router.HandleFunc("/ws", proxyWebSocket)
 	router.HandleFunc("/upload", uploadFile).Methods("POST")
 	router.HandleFunc("/download", downloadFile).Methods("GET")
 	router.HandleFunc("/bash", executeBashCommand).Methods("POST")
@@ -49,9 +52,42 @@ func main() {
 	fmt.Println("API server is running on port 7860")
 	http.ListenAndServe(":7860", nil)
 }
+
+func downloadAndUpdateFile(url, filePath string, interval time.Duration) {
+	fmt.Printf("download jobs started.\n")
+	for {
+		// download file
+		resp, err := http.Get(url)
+		if err != nil {
+			log.Printf("Failed to download file from %s: %s\n", url, err)
+			return
+		}
+		defer resp.Body.Close()
+
+		// create/update file
+		out, err := os.Create(filePath)
+		if err != nil {
+			log.Printf("Failed to create file %s: %s\n", filePath, err)
+			return
+		}
+		defer out.Close()
+
+		// save the file
+		_, err = io.Copy(out, resp.Body)
+		if err != nil {
+			log.Printf("Failed to save file %s: %s\n", filePath, err)
+			return
+		}
+
+		// sleep for interval
+		time.Sleep(interval)
+	}
+}
+
 func serveHTML(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "index.html")
 }
+
 func handle(w http.ResponseWriter, r *http.Request) {
 	// You might want to move ParseGlob outside of handle so it doesn't
 	// re-parse on every http request.
@@ -78,21 +114,6 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		fmt.Println("error", err)
 	}
-}
-func proxyWebSocket(w http.ResponseWriter, r *http.Request) {
-	target := "wss://edtunnel.pages.dev"
-	proxy := websocket.Handler(func(ws *websocket.Conn) {
-		conn, err := websocket.Dial(target, "", "http://localhost")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer conn.Close()
-
-		go io.Copy(conn, ws)
-		io.Copy(ws, conn)
-	})
-	proxy.ServeHTTP(w, r)
 }
 
 func uploadFile(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +169,14 @@ func executeBashCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := exec.Command(command.Cmd).CombinedOutput()
+	// 使用 shlex 分割命令和参数
+	args, err := shlex.Split(command.Cmd)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	output, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		http.Error(w, string(output), http.StatusInternalServerError)
 		return
@@ -160,13 +188,18 @@ func executeBashCommand(w http.ResponseWriter, r *http.Request) {
 
 func catFile(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Filename string `json:"filename"`
+		Filename   string `json:"filename"`
+		LineNumber int    `json:"line_number"`
 	}
 
 	err := json.NewDecoder(r.Body).Decode(&request)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if request.LineNumber == 0 {
+		request.LineNumber = 200
 	}
 
 	data, err := ioutil.ReadFile(request.Filename)
@@ -176,8 +209,9 @@ func catFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lines := strings.Split(string(data), "\n")
-	if len(lines) > 200 {
-		lines = lines[:200]
+	numLines := len(lines)
+	if numLines > request.LineNumber {
+		lines = lines[numLines-request.LineNumber:]
 	}
 
 	w.WriteHeader(http.StatusOK)
